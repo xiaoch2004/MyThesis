@@ -1,0 +1,233 @@
+%# -*- coding: utf-8-unix -*-
+%%==================================================
+%% chapter01.tex for SJTU Master Thesis
+%%==================================================
+
+%\bibliographystyle{sjtu2}%[此处用于每章都生产参考文献]
+\chapter{一种基于自适应积分滑模方法的抗参数扰动与执行机构故障的控制策略}
+\label{chap:aismc}
+\section{引言}
+第\ref{chap:asmcsat}章介绍了一种能应对惯性矩阵扰动和气动系数扰动的自适应滑模算法。但是没有考虑执行机构故障。然而执行机构故障对于平流层浮空器来说是一种常见的故障，应当被考虑在内。其实，第\ref{chap:asmcsat}章的算法可以稍做修改，就能处理执行机构不确定的问题。比如把不确定的执行机构函数加入假设\newref{3ass:F}和\newref{3ass:MCJ}中。但是这样的做法将所有不确定性都同时处理了，并不能根据执行机构的错误严重程度进行参数调节。此外，第\ref{chap:asmcsat}章的算法只能定点稳定浮空器，但有时执行任务时浮空器需要在多个任务地点之间往返。本章通过引入积分滑模面，重新设计了一个自适应积分滑模控制器，解决了处理执行机构故障的问题，提出了一个能够同时处理惯性矩阵不确定、气动系数不确定、外部扰动、执行机构效率矩阵不确定以及执行机构输出有偏移情况的浮空器位置追踪算法。本节算法的特色是提出的控制算法中每种错误都对应一个调节参数，以应对不同等级的不确定性。
+
+本文已经在第\ref{chap:preliminary}章给出了执行机构的故障建模，这里稍作回顾。
+
+螺旋桨遇到的问题可以归结为效率损失、输出偏移，卡顿和失效等几类。假设某个执行机构$i$的期望输出为$\upsilon_i$, 其输出效率为$\varepsilon_i$，输出偏移为$\bar{\upsilon_i}$，那么式\newref{eq:outputeff}给出了它们之间的关系：
+\begin{equation*}
+    u_{ai} = \varepsilon_i(t)\upsilon_i+\bar{\upsilon_i}
+\end{equation*}
+
+对于上述提到的各种故障，可总结其数学模型于表\newref{tab:faultmodelc4}。
+\begin{table}[ht]
+    \centering
+	\bicaption[tab:faultmodelc4]{螺旋桨故障及其数学模型}{螺旋桨故障及其数学模型}{Table}{Thrust fault classifications and math models}
+	\vspace{0.5em}
+	\begin{tabular}{lll}
+		\toprule
+		故障类型&$\varepsilon_i(t)$&$\bar{\upsilon}_i$ \\
+		\midrule
+		正常&$\varepsilon_i(t)=1$&$\bar{\upsilon}_i=0$\\
+		效率损失&$\varepsilon_i(t)<1$&$\bar{\upsilon}_i=0$\\
+		输出偏移&$\varepsilon_i(t)=1$&$\bar{\upsilon}_i\neq0$\\
+		卡顿&$\varepsilon_i(t)=0$&$\upsilon_i\neq0$\\
+		失效&$\varepsilon_i(t)=0$&$\upsilon_i=0$\\
+		\bottomrule
+	\end{tabular}
+\end{table}
+
+浮空器的实际输出$\mathbf{F_t}$可用式\neweqref{eq:inputtransc4}表示
+
+\begin{equation}\label{eq:inputtransc4}
+    \mathbf{F_t} = \mathbf{Du_a} = \mathbf{D}[EF_{HV} + \bar{\upsilon}]
+\end{equation}
+
+其中$\mathbf{D}$在式\neweqref{eq:D}中给出，其他参数
+
+\begin{equation*}
+    E = \left[\begin{matrix}
+    \varepsilon_1&&&&&&&\\
+    &\varepsilon_2&&&&&&\\
+    &&\varepsilon_3&&&&&\\
+    &&&\varepsilon_4&&&&\\
+    &&&&\varepsilon_5&&&\\
+    &&&&&\varepsilon_6&&\\
+    &&&&&&\varepsilon_7&\\
+    &&&&&&&\varepsilon_8\\
+    \end{matrix}\right]
+\end{equation*}
+
+\begin{equation*}
+    \bar{\upsilon} = \left[\begin{matrix}
+    \bar{\upsilon}_1&\bar{\upsilon}_2&\cdots&\bar{\upsilon}_8
+    \end{matrix}\right]^T
+\end{equation*}
+$E$为执行机构效率矩阵，$\bar{\upsilon}$为执行机构输出偏移向量。$F_{HV}$则是浮空器实际执行机构输入的非线性函数。
+
+\section{问题描述}
+在提出故障模型后，浮空器的不确定模型为
+\begin{equation}\label{eq:4uncertainmodel}
+    \begin{cases}
+    \hspace{1em}\dot{\mathbf{x}}_1 &= \mathbf{J}\mathbf{x}_2\\
+    \mathbf{M}\dot{\mathbf{x}}_2&=\mathbf{F_{gb}+F_{i}(x_2)}+\mathbf{S(x_2)}\mathbf{c}+\mathbf{D}[EF_{HV} + \bar{\upsilon}]+\mathbf{d}
+    \end{cases}
+\end{equation}
+
+其中$\mathbf{M}$、$\mathbf{c}$、$\bar{\upsilon}$、$\mathbf{d}$均未知。本节目的是对模型\newref{eq:4uncertainmodel}设计一个控制器，使得浮空器能跟踪所给位置和姿态角信号并保持稳定。
+
+\section{算法详述}
+
+为了引入算法，首先引入如下合理的假设
+
+\begin{ass}\label{4ass}
+    假定浮空器的几个不确定参数的模都小于某个未知的上界，即
+    \begin{eqnarray}
+    \bnorm{M} &\leqslant M_{max} \\
+    \bnorm{c} &\leqslant c_{max} \\
+    \bnorm{d} &\leqslant d_{max} \\
+    \bar{\upsilon} &\leqslant \bar{\upsilon}_{max} \\
+    \end{eqnarray}
+\end{ass}
+
+本章的目的在假设\newref{4ass}的前提下，为模型\newref{eq:4uncertainmodel}是设计一个能跟踪位置和姿态角信号的控制器。首先引入跟踪误差$\mathbf{e}(t)$：
+\begin{equation}\label{eq:errordef}
+    \mathbf{e}(t)=\mathbf{J}^{-1}(\mathbf{x}_1-\mathbf{x}_{1d})
+\end{equation}
+
+其中$\mathbf{x}_{1d}$表示要追踪的信号。
+
+引入积分滑模面
+\begin{equation}\label{eq:slidingsurface}
+\mathbf{s}(t)=\dot{\mathbf{e}}(t)-\dot{\mathbf{e}}(0)-\int_{0}^{t}[-\alpha\dot{\mathbf{e}}(\tau)-\beta\mathbf{e}(\tau)]\mathrm{d}\tau
+\end{equation}
+
+其中 $\alpha,\beta>0$是可选标量参数。根据滑模理论，当系统轨迹达到滑模面时，有$\dot{\mathbf{s}}=\mathbf{s}=0$，即
+
+\begin{equation}
+    \ddot{\mathbf{e}}(t)+\alpha\dot{\mathbf{e}}(t)+\beta\mathbf{e}=0
+\end{equation}
+
+选取$\alpha$和$\beta$使方程$x^2+\alpha x+\beta=0$有两个负实根，则当$\mathbf{s}(t)=0$时，$\mathbf{e}(t)$会渐进收敛到原点。
+
+沿袭第\ref{chap:asmcsat}章自适应滑模控制器的设计思路，本章给传统的滑模面添加一个积分项，用以减小系统到达滑模面的时间。
+
+基于滑模面\neweqref{eq:slidingsurface}和假设\newref{4ass}，提出如下控制器：
+\begin{align}\label{eq:4controller}
+\upsilon=&-\frac{\bnorm{F}\mathbf{D}^T\mathbf{s}(t)}{\sigma \snorm}
+-\frac{\bnorm{D}\hat{\bar{\upsilon}}_{max}\mathbf{D}^T\mathbf{s}(t)}{k_1 \snorm}
+-\frac{\bnorm{S}\hat{c}_{max}\mathbf{D}^T\mathbf{s}(t)}{k_2 \snorm} \nonumber
+\\&-\frac{\hat{d}_{max}\mathbf{D}^T\mathbf{s}(t)}{k_3 \snorm}-\frac{\bnorm{G}\hat{M}_{max}\mathbf{D}^T\mathbf{s}(t)}{k_4 \snorm}
+-\frac{\mu\mathbf{D}^T\mathbf{s}(t)}{\snorm}
+\end{align}
+
+其中$k_1,\quad k_2,\quad k_3,\quad k_4>0$为可选参数，且
+\begin{align}
+\mathbf{G} =& \mathbf{\ddot{J}^{-1}}(\mathbf{x}_1-\mathbf{x}_{1d})+\mathbf{\dot{J}^{-1}JV}+\alpha\mathbf{\dot{J}^{-1}}(\mathbf{x}_1-\mathbf{x}_{1d})
+\nonumber\\&+\alpha\mathbf{V}+\beta\mathbf{J^{-1}}(\mathbf{x}_1-\mathbf{x}_{1d})
+\end{align}
+\begin{eqnarray}
+\dot{\hat{\bar{\upsilon}}}_{max} &= -\lambda_1^2\hat{\bar{\upsilon}}_{max}+\xi_1\bnorm{D}\bnorm{s(t)} \label{eq:vupdt} \\
+\dot{\hat{c}}_{max} &= -\lambda_2^2\hat{c}_{max}+\xi_2\bnorm{D}\bnorm{s(t)} \label{eq:cupdt} \\
+\dot{\hat{d}}_{max} &= -\lambda_3^2\hat{d}_{max}+\xi_3\bnorm{D}\bnorm{s(t)} \label{eq:dupdt} \\
+\dot{\hat{M}}_{max} &= -\lambda_4^2\hat{M}_{max}+\xi_4\bnorm{D}\bnorm{s(t)} \label{eq:Mupdt} \\
+\dot{\lambda}_i&=-\kappa_i\lambda_i,\quad (i=1,2,3,4) \label{eq:lbdupdt}
+\end{eqnarray}
+
+其中$\hat{\bar{\upsilon}}_{max}$、$\hat{c}_{max}$、$\hat{d}_{max}$、$\hat{M}_{max}$可分别看做是执行机构偏移量、气动系数向量、外部扰动和惯性矩阵的上限估计值，且满足
+\begin{eqnarray}
+\hat{\bar{\upsilon}}_{max}(0)>0 \nonumber\\
+\hat{c}_{max}(0)>0 \nonumber\\
+\hat{d}_{max}(0)>0 \nonumber\\
+\hat{M}_{max}(0)>0 \nonumber
+\end{eqnarray}
+
+$\xi_i,\kappa_i,\lambda_i,k_i$ 和 $\mu$ 都是正标量。 $\sigma>0$ 且满足
+\begin{equation}\label{eq:sigma<dedt}
+    0<\sigma<\mathbf{DE(t)D^T}
+\end{equation}
+
+注意$\mathbf{DE(t)D^T}$是一个$6\times 6$的矩阵，式\neweqref{eq:sigma<dedt}的意思是$\sigma>0$，但是小于矩阵$\mathbf{DE(t)D^T}$的最小特征值。
+
+下面证明浮空器系统\newref{eq:4uncertainmodel}在控制器\newref{eq:4controller}的作用下，是全局渐进稳定的。取李雅普诺夫函数
+\begin{align*}\label{eq:4lypa}
+	V(t) =& \frac{1}{2}\mathbf{s}^T(t)\mathbf{M}\mathbf{s}(t)
+	+\frac{k_1(\bar{\upsilon}_{max}-\frac{\sigma}{k_1}\hat{\bar{\upsilon}}_{max})^2}{2\sigma\xi_1}+\frac{\kappa^{-1}_1\lambda_1^2 k_1\bar{\upsilon}_{max}^2}{8\sigma\xi_1}
+	\\&+\frac{k_2(c_{max}-\frac{\sigma}{k_2}\hat{c}_{max})^2}{2\sigma\xi_2}+\frac{\kappa^{-1}_2\lambda_2^2 k_2 c_{max}^2}{8\sigma\xi_2}
+	+\frac{k_3(d_{max}-\frac{\sigma}{k_3}\hat{d}_{max})^2}{2\sigma\xi_3} 
+	\\&+\frac{\kappa^{-1}_3\lambda_3^2 k_1 d_{max}^2}{8\sigma\xi_3}
+	+\frac{k_4(M_{max}-\frac{\sigma}{k_4}\hat{M}_{max})^2}{2\sigma\xi_4}+\frac{\kappa^{-1}_4\lambda_4^2 k_4 M_{max}^2}{8\sigma\xi_4} \numberthis
+\end{align*}
+
+由于$\frac{1}{2}\mathbf{s}^T(t)\mathbf{M}\mathbf{s}(t)>0$，于是有$V>0$。
+
+对$V$求导，可得
+%\begin{align}
+% \dot{V}&=\mathbf{s}^T\left[\mathbf{D}\mathbf{E}\upsilon+\mathbf{D}\mathbf{\bar{\upsilon}}+\mathbf{M}\ddot{\mathbf{J}}^{-1}(\mathbf{x}_1-\mathbf{x}_{1d})+\mathbf{M}\dot{\mathbf{J}}^{-1}\mathbf{JV}   \right]
+%\end{align}
+\begin{align}
+	\dot{V}(t)&=\mathbf{s}^T(t)\big[\mathbf{D}\mathbf{E}(t)\upsilon+\mathbf{D}\bar{\upsilon}+\mathbf{M}\mathbf{\ddot{\mathbf{J}}}^{-1}(\mathbf{x}_1-\mathbf{x}_{1d})+\mathbf{M}\dot{\mathbf{J}}^{-1}\mathbf{JV} \nonumber
+	\\&+\mathbf{F+Sc+d}+\alpha\mathbf{M}\dot{\mathbf{J}}^{-1}(\mathbf{x}_1-\mathbf{x}_{1d})+\alpha\mathbf{MV} \nonumber
+	\\&+\beta\mathbf{MJ}^{-1}(\mathbf{x}_1-\mathbf{x}_{1d})\big]-\frac{(\bar{\upsilon}_{max}-\frac{\sigma}{k_1}\hat{\bar{\upsilon}}_{max})\dot{\hat{\bar{\upsilon}}}_{max}}{\xi_1} \nonumber
+	\\&+\frac{\kappa_1^{-1}\lambda_1\dot{\lambda}_1k_1\bar{\upsilon}_{max}^2}{4\sigma\xi_1}	-\frac{(c_{max}-\frac{\sigma}{k_2}\hat{c}_{max})\dot{\hat{c}}_{max}}{\xi_2} \nonumber
+	\\&+\frac{\kappa_2^{-1}\lambda_2\dot{\lambda}_2k_2c_{max}^2}{4\sigma\xi_2}
+	-\frac{(d_{max}-\frac{\sigma}{k_3}\hat{d}_{max})\dot{\hat{d}}_{max}}{\xi_3} \nonumber
+	\\&+\frac{\kappa_3^{-1}\lambda_3\dot{\lambda}_3k_3d_{max}^2}{4\sigma\xi_3}
+	-\frac{(M_{max}-\frac{\sigma}{k_4}\hat{M}_{max})\dot{\hat{M}}_{max}}{\xi_4} \nonumber
+	\\&+\frac{\kappa_4^{-1}\lambda_4\dot{\lambda}_4k_4M_{max}^2}{4\sigma\xi_4} \nonumber
+	\\&\leqslant\mathbf{s}^T(t)\mathbf{D}\mathbf{E}(t)\mathbf{\upsilon}+\bar{v}_{max}\bnorm{D}\snorm \nonumber
+	\\&+M_{max}\bnorm{G}\snorm
+	+\bnorm{F}\snorm \nonumber
+	\\&+c_{max}\bnorm{S}\snorm+d_{max}\snorm \nonumber
+	\\&-\frac{(\bar{\upsilon}_{max}-\frac{\sigma}{k_1}\hat{\bar{\upsilon}}_{max})\dot{\hat{\bar{\upsilon}}}_{max}}{\xi_1}
+	+\frac{\kappa_1^{-1}\lambda_1\dot{\lambda}_1k_1\bar{\upsilon}_{max}^2}{4\sigma\xi_1} \nonumber
+	\\&-\frac{(c_{max}-\frac{\sigma}{k_2}\hat{c}_{max})\dot{\hat{c}}_{max}}{\xi_2}
+	+\frac{\kappa_2^{-1}\lambda_2\dot{\lambda}_2k_2c_{max}^2}{4\sigma\xi_2} \nonumber
+	\\&-\frac{(d_{max}-\frac{\sigma}{k_3}\hat{d}_{max})\dot{\hat{d}}_{max}}{\xi_3}
+	+\frac{\kappa_3^{-1}\lambda_3\dot{\lambda}_3k_3d_{max}^2}{4\sigma\xi_3} \nonumber
+	\\&-\frac{(M_{max}-\frac{\sigma}{k_4}\hat{M}_{max})\dot{\hat{M}}_{max}}{\xi_4}
+	+\frac{\kappa_4^{-1}\lambda_4\dot{\lambda}_4k_4M_{max}^2}{4\sigma\xi_4}  \label{eq:mediumprocedure}
+\end{align}
+
+把\neweqref{eq:4controller}代入\neweqref{eq:mediumprocedure}，可得
+\begin{align*}
+\dot{V}(t)&\leqslant-\mathbf{s}^T(t)\mathbf{DE}(t)\bigg[\frac{\bnorm{F}\mathbf{D}^T\mathbf{s}(t)}{\sigma\snorm}+\frac{\bnorm{D}\hat{\bar{\upsilon}}_{max}\mathbf{D}^T\mathbf{s}(t)}{k_1\snorm}
+	\\&+\frac{\bnorm{S}\hat{c}_{max}\mathbf{D}^T\mathbf{s}(t)}{k_2\snorm}
+	+\frac{\hat{d}_{max}\mathbf{D}^T\mathbf{s}(t)}{k_3\snorm}
+	\\&+\frac{\bnorm{G}\hat{M}_{max}\mathbf{D}^T\mathbf{s}(t)}{k_4\snorm}
+	+\frac{\mu\mathbf{D}^T\mathbf{s}(t)}{\snorm}\bigg]
+	\\&+\bar{v}_{max}\bnorm{D}\snorm
+	+M_{max}\bnorm{G}\snorm
+	\\&+\bnorm{F}\snorm+c_{max}\bnorm{S}\snorm+d_{max}\snorm
+	\\&-\frac{(\bar{\upsilon}_{max}-\frac{\sigma}{k_1}\hat{\bar{\upsilon}}_{max})\dot{\hat{\bar{\upsilon}}}_{max}}{\xi_1}
+	+\frac{\kappa_1^{-1}\lambda_1\dot{\lambda}_1k_1\bar{\upsilon}_{max}^2}{4\sigma\xi_1}
+	\\&-\frac{(c_{max}-\frac{\sigma}{k_2}\hat{c}_{max})\dot{\hat{c}}_{max}}{\xi_2}
+	+\frac{\kappa_2^{-1}\lambda_2\dot{\lambda}_2k_2c_{max}^2}{4\sigma\xi_2}
+	\\&-\frac{(d_{max}-\frac{\sigma}{k_3}\hat{d}_{max})\dot{\hat{d}}_{max}}{\xi_3}
+	+\frac{\kappa_3^{-1}\lambda_3\dot{\lambda}_3k_3d_{max}^2}{4\sigma\xi_3}
+	\\&-\frac{(M_{max}-\frac{\sigma}{k_4}\hat{M}_{max})\dot{\hat{M}}_{max}}{\xi_4}
+	+\frac{\kappa_4^{-1}\lambda_4\dot{\lambda}_4k_4M_{max}^2}{4\sigma\xi_4}
+	\\&\leqslant-\mu\sigma\snorm+(\bar{\upsilon}_{max}-\frac{\sigma}{k_1}\hat{\bar{\upsilon}})\bnorm{D}\snorm
+	\\&+(c_{max}-\frac{\sigma}{k_2}\hat{c})\bnorm{S}\snorm+(d_{max}-\frac{\sigma}{k_3}\hat{d})\snorm
+	\\&+(M_{max}-\frac{\sigma}{k_4}\hat{M})\bnorm{G}\snorm
+	\\&-\frac{(\bar{\upsilon}_{max}-\frac{\sigma}{k_1}\hat{\bar{\upsilon}}_{max})\dot{\hat{\bar{\upsilon}}}_{max}}{\xi_1}
+	-\frac{\lambda_1^2k_1\bar{\upsilon}_{max}^2}{4\sigma\xi_1}
+	\\&-\frac{(c_{max}-\frac{\sigma}{k_2}\hat{c}_{max})\dot{\hat{c}}_{max}}{\xi_2}
+	-\frac{\lambda_2^2k_2c_{max}^2}{4\sigma\xi_2}
+	\\&-\frac{(d_{max}-\frac{\sigma}{k_3}\hat{d}_{max})\dot{\hat{d}}_{max}}{\xi_3}
+	-\frac{\lambda_3^2k_3d_{max}^2}{4\sigma\xi_3}
+	\\&-\frac{(M_{max}-\frac{\sigma}{k_4}\hat{M}_{max})\dot{\hat{M}}_{max}}{\xi_4}
+	-\frac{\lambda_4^2k_4M_{max}^2}{4\sigma\xi_4}\numberthis  \label{eq:proof2}    
+\end{align*}
+
+根据自适应率\neweqref{eq:vupdt}\neweqref{eq:dupdt}\neweqref{eq:cupdt}\neweqref{eq:Mupdt}\neweqref{eq:lbdupdt}，我们有
+\begin{align*}
+	\dot{V}(t)&\leqslant-\mu\sigma\snorm
+	\\&-\frac{\lambda_1^2\norm{\sqrt{k_1}\bar{\upsilon}_{max}-\frac{2\sigma\hat{\bar{\upsilon}}_{max}}{\sqrt{k_1}}}^2}{4\sigma\xi_1}
+	\\&-\frac{\lambda_2^2\norm{\sqrt{k_2}c_{max}-\frac{2\sigma\hat{c}_{max}}{\sqrt{k_2}}}^2}{4\sigma\xi_2}
+	\\&-\frac{\lambda_3^2\norm{\sqrt{k_3}d_{max}-\frac{2\sigma\hat{d}_{max}}{\sqrt{k_3}}}^2}{4\sigma\xi_3}
+	\\&-\frac{\lambda_4^2\norm{\sqrt{k_4}M_{max}-\frac{2\sigma\hat{M}_{max}}{\sqrt{k_4}}}^2}{4\sigma\xi_4}\\
+	&\leqslant-\mu\sigma\snorm<0  \numberthis \label{eq:proof3}
+\end{align*}
+因此，系统能在有限时间内到达滑模面，证毕。
+
+
+\section{数值仿真}
+\section{本章小结}
